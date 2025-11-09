@@ -1,11 +1,13 @@
 export type RenderStrategy = 'raf' | 'event' | 'timeout';
 
 export interface WorkerMessage {
-  type: 'init' | 'setStrategy' | 'setComplexity' | 'setSpeed' | 'triggerRender' | 'stop';
+  type: 'init' | 'setStrategy' | 'setComplexity' | 'setSpeed' | 'triggerRender' | 'stop' | 'pointerMove';
   canvas?: OffscreenCanvas;
   strategy?: RenderStrategy;
   complexity?: number;
   speed?: number;
+  x?: number;
+  y?: number;
 }
 
 export interface WorkerResponse {
@@ -33,4 +35,3 @@ export interface WorkerStats {
   maxRenderTime: number;
   framesRendered: number;
 }
-

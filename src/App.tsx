@@ -67,6 +67,22 @@ function App() {
     transferred = true;
     worker.postMessage({ type: 'init', canvas: offscreen }, [offscreen]);
 
+    // Track pointer movement and send to worker
+    const handlePointerMove = (e: PointerEvent) => {
+      if (worker) {
+        const rect = canvas.getBoundingClientRect();
+        const x = ((e.clientX - rect.left) / rect.width) * canvas.width;
+        const y = ((e.clientY - rect.top) / rect.height) * canvas.height;
+        worker.postMessage({ type: 'pointerMove', x, y });
+      }
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+
+    const cleanup = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+    };
+
     // Start main thread performance monitoring
     const frameTimes: number[] = [];
     let maxFrameTime = 0;
@@ -114,6 +130,7 @@ function App() {
     rafId = requestAnimationFrame(measure);
 
     return () => {
+      cleanup();
       if (rafId) cancelAnimationFrame(rafId);
       if (worker) {
         worker.postMessage({ type: 'stop' });
@@ -126,23 +143,8 @@ function App() {
   const handleStrategyChange = (newStrategy: RenderStrategy) => {
     setStrategy(newStrategy);
 
-    if (rafId) {
-      cancelAnimationFrame(rafId);
-      rafId = undefined;
-    }
-
     if (worker) {
       worker.postMessage({ type: 'setStrategy', strategy: newStrategy });
-
-      if (newStrategy === 'event') {
-        const triggerRender = () => {
-          if (worker && strategy === 'event') {
-            worker.postMessage({ type: 'triggerRender' });
-            rafId = requestAnimationFrame(triggerRender);
-          }
-        };
-        rafId = requestAnimationFrame(triggerRender);
-      }
     }
   };
 
@@ -168,6 +170,18 @@ function App() {
   return (
     <div className="app">
       <canvas ref={canvasRef} className="render-canvas" />
+
+      {/* Essential info overlay - always on top */}
+      <div className="essential-info">
+        <div className="essential-stat">
+          <span className="essential-label">Main:</span>
+          <span className="essential-value">{mainStats.mainFPS} FPS</span>
+        </div>
+        <div className="essential-stat">
+          <span className="essential-label">Worker:</span>
+          <span className="essential-value">{workerStats.workerFPS} FPS</span>
+        </div>
+      </div>
 
       <ControlsPanel
         currentStrategy={strategy}

@@ -100,7 +100,7 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
           <input
             type="range"
             min="0"
-            max="100"
+            max="500"
             value={complexity}
             onChange={(e) => handleComplexityChange(Number(e.target.value))}
           />

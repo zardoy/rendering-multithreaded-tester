@@ -11,12 +11,20 @@ let isRunning = false;
 // Performance tracking
 let frameCount = 0;
 let lastStatsTime = performance.now();
-let renderTimes: number[] = [];
+const renderTimes: number[] = [];
 let maxRenderTime = 0;
+
+// Frame timing tracking (for visualization)
+const frameTimings: Array<{ start: number; end: number }> = [];
 
 // Animation state
 let offset = 0;
 const particles: Array<{ x: number; y: number; vx: number; vy: number; color: string }> = [];
+
+// Pointer tracking
+let pointerX = 0;
+let pointerY = 0;
+let hasPointer = false;
 
 function initParticles(width: number, height: number): void {
   particles.length = 0;
@@ -34,6 +42,53 @@ function initParticles(width: number, height: number): void {
   }
 }
 
+function drawFrameTimingBar(width: number, _height: number): void {
+  if (!ctx) return;
+
+  const barHeight = 20;
+  const now = performance.now();
+
+  // Draw background bar
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.fillRect(0, 0, width, barHeight);
+
+  // Draw frame timing bars
+  frameTimings.forEach(timing => {
+    if (!ctx) return;
+    const age = now - timing.end;
+    if (age > 1000) return; // Only show last second
+
+    // Position on timeline (right = most recent, left = 1 second ago)
+    const x = width - (age / 1000) * width;
+    const duration = timing.end - timing.start;
+    const barWidth = Math.max(2, (duration / 1000) * width); // At least 2px wide
+
+    // Color based on duration
+    let color = '#FF0000'; // Red for frames
+    if (duration < 16.67) {
+      color = '#00FF00'; // Green for good frames (<16.67ms)
+    } else if (duration < 33.33) {
+      color = '#FFAA00'; // Orange for slow frames
+    }
+
+    ctx.fillStyle = color;
+    ctx.fillRect(x - barWidth, 0, barWidth, barHeight);
+  });
+
+  // Draw timeline markers
+  if (!ctx) return;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 10; i++) {
+    if (!ctx) return;
+    const x = (i / 10) * width;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, barHeight);
+    ctx.stroke();
+  }
+}
+
 function render(): void {
   if (!ctx || !canvas) return;
 
@@ -45,6 +100,9 @@ function render(): void {
   // Clear canvas
   ctx.fillStyle = '#0a0a0a';
   ctx.fillRect(0, 0, width, height);
+
+  // Draw frame timing visualization bar at the top
+  drawFrameTimingBar(width, height);
 
   // Update and draw moving bar (to easily spot freezes)
   offset += animationSpeed;
@@ -60,39 +118,68 @@ function render(): void {
 
   // Draw moving particles
   particles.forEach(particle => {
+    if (!ctx) return;
     particle.x += particle.vx * animationSpeed;
     particle.y += particle.vy * animationSpeed;
-
+    
     // Bounce off walls
     if (particle.x < 0 || particle.x > width) particle.vx *= -1;
     if (particle.y < 0 || particle.y > height) particle.vy *= -1;
-
+    
     // Keep in bounds
     particle.x = Math.max(0, Math.min(width, particle.x));
     particle.y = Math.max(0, Math.min(height, particle.y));
-
+    
     ctx.fillStyle = particle.color;
     ctx.beginPath();
     ctx.arc(particle.x, particle.y, 5, 0, Math.PI * 2);
     ctx.fill();
   });
 
+  // Draw pointer ball (slightly below actual pointer)
+  if (hasPointer) {
+    const ballY = pointerY + 30; // 30 pixels below pointer
+    ctx.fillStyle = '#FFD700';
+    ctx.strokeStyle = '#FFA500';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(pointerX, ballY, 15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Add glow effect
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = '#FFD700';
+    ctx.beginPath();
+    ctx.arc(pointerX, ballY, 15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
   // Add artificial complexity (junk work)
-  for (let i = 0; i < renderComplexity * 1000; i++) {
+  // At max complexity (1000), this will do 10 million operations
+  for (let i = 0; i < renderComplexity * 10000; i++) {
     Math.sqrt(Math.random() * 1000);
   }
 
   // Track performance
-  const renderTime = performance.now() - startTime;
+  const endTime = performance.now();
+  const renderTime = endTime - startTime;
   renderTimes.push(renderTime);
   if (renderTimes.length > 60) renderTimes.shift();
   maxRenderTime = Math.max(maxRenderTime, renderTime);
   frameCount++;
 
+  // Track frame timing for visualization
+  frameTimings.push({ start: startTime, end: endTime });
+  // Keep only last second
+  while (frameTimings.length > 0 && endTime - frameTimings[0].end > 1000) {
+    frameTimings.shift();
+  }
+
   // Send stats every 100ms
-  const now = performance.now();
-  if (now - lastStatsTime >= 100) {
-    const elapsed = (now - lastStatsTime) / 1000;
+  if (endTime - lastStatsTime >= 100) {
+    const elapsed = (endTime - lastStatsTime) / 1000;
     const fps = frameCount / elapsed;
     const avgRenderTime = renderTimes.reduce((a, b) => a + b, 0) / renderTimes.length;
 
@@ -108,7 +195,7 @@ function render(): void {
     self.postMessage(response);
 
     frameCount = 0;
-    lastStatsTime = now;
+    lastStatsTime = endTime;
     maxRenderTime = 0;
   }
 }
@@ -139,7 +226,7 @@ function stopRendering(): void {
 }
 
 self.onmessage = (e: MessageEvent<WorkerMessage>) => {
-  const { type, canvas: newCanvas, strategy, complexity, speed } = e.data;
+  const { type, canvas: newCanvas, strategy, complexity, speed, x, y } = e.data;
 
   switch (type) {
     case 'init':
@@ -155,7 +242,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
           } else if (currentStrategy === 'timeout') {
             startTimeout();
           }
-          // For 'event' strategy, we wait for triggerRender messages
+          // For 'event' strategy, we wait for pointerMove messages
 
           self.postMessage({ type: 'ready' });
         }
@@ -173,7 +260,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
         } else if (strategy === 'timeout') {
           startTimeout();
         }
-        // For 'event' strategy, rendering happens on triggerRender
+        // For 'event' strategy, rendering happens on pointerMove
       }
       break;
 
@@ -186,6 +273,19 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
     case 'setSpeed':
       if (speed !== undefined) {
         animationSpeed = speed;
+      }
+      break;
+
+    case 'pointerMove':
+      if (x !== undefined && y !== undefined) {
+        pointerX = x;
+        pointerY = y;
+        hasPointer = true;
+
+        // In event-driven mode, render on every pointer move
+        if (currentStrategy === 'event') {
+          render();
+        }
       }
       break;
 
